@@ -1,0 +1,335 @@
+-- deep compare tables and userdata
+local function deep_compare(a, b)
+	if type(a) ~= type(b) then return false end
+
+	if type(a) == "table" then
+		for k, v in pairs(a) do
+			if not deep_compare(v, b[k]) then return false end
+		end
+		for k, v in pairs(b) do
+			if a[k] == nil then return false end
+		end
+		return true
+	end
+
+	return a == b
+end
+
+-- print section header
+local function print_banner(title, width)
+	width = width or 97
+	local pad = math.max(0, math.floor((width - #title) / 2))
+	print("\n" .. string.rep("=", width))
+	print(string.rep(" ", pad) .. title)
+	print(string.rep("=", width))
+end
+
+function init(self)
+	-- setup matrix4 with test values
+	local test_mat = vmath.matrix4()
+	test_mat.m00, test_mat.m01, test_mat.m02, test_mat.m03 = 1.1, 1.2, 1.3, 1.4
+	test_mat.m10, test_mat.m11, test_mat.m12, test_mat.m13 = 2.1, 2.2, 2.3, 2.4
+	test_mat.m20, test_mat.m21, test_mat.m22, test_mat.m23 = 3.1, 3.2, 3.3, 3.4
+	test_mat.m30, test_mat.m31, test_mat.m32, test_mat.m33 = 4.1, 4.2, 4.3, 4.4
+
+	-- build master test table
+	local original_data = {
+		-- booleans and numbers
+		bool_true = true,
+		bool_false = false,
+		int_val = 42,
+		negative_int = -999999,
+		float_pi = math.pi,
+		float_third = 1 / 3,
+		huge_53bit_int = 9007199254740991,
+
+		-- strings and raw binary with null bytes
+		text_str = "Hello Defold BinaryPack!",
+		empty_str = "",
+		raw_binary = "BIN_START\0\1\2\255\0\128\0BIN_END",
+
+		-- defold userdata types
+		id_hash = hash("player_entity_01"),
+		empty_hash = hash(""),
+		pos_vec3 = vmath.vector3(128.5, -64.25, 0.00125),
+		color_vec4 = vmath.vector4(0.25, 0.5, 0.75, 1.0),
+		rot_quat = vmath.quat_rotation_z(math.rad(45)),
+		transform_mat4 = test_mat,
+
+		-- nested array and dictionary tables
+		nested_array = { 10, 20, 30, "forty", true, hash("array_hash") },
+		nested_dict = {
+			level_1 = {
+				level_2 = {
+					level_3 = {
+						secret = "deep_value",
+						offset = vmath.vector3(1, 2, 3)
+					}
+				}
+			},
+			[100] = "numeric_key_test"
+		}
+	}
+
+	-- section 1: unit and error handling tests
+	print_banner("BINARY_PACK: UNIT & SECURITY TESTS", 77)
+
+	local sys_bin = sys.serialize(original_data)
+	local raw_bin = binary_pack.encode(original_data)
+	local sha_bin = binary_pack.encode_sha(original_data)
+
+	-- test 1a: standard round-trip and null bytes
+	local decoded_raw = binary_pack.decode(raw_bin)
+	assert(deep_compare(original_data, decoded_raw), "FAIL: Standard decoded table mismatch!")
+	assert(#decoded_raw.raw_binary == #original_data.raw_binary, "FAIL: Binary string truncated!")
+
+	-- test 1b: hash as table key
+	local hash_key_table = { [hash("custom_hash_key")] = vmath.vector3(7, 8, 9) }
+	local decoded_hk = binary_pack.decode(binary_pack.encode(hash_key_table))
+	assert(decoded_hk[hash("custom_hash_key")] == vmath.vector3(7, 8, 9), "FAIL: Hash table key failed!")
+
+	-- test 2: sha256 round-trip
+	local decoded_sha = binary_pack.decode_sha(sha_bin)
+	assert(deep_compare(original_data, decoded_sha), "FAIL: SHA decoded table mismatch!")
+
+	-- test 3: 30 level deep nesting
+	local deep_root = {}
+	local curr = deep_root
+	for i = 1, 30 do
+		curr.next_node = { depth = i, vec = vmath.vector3(i, i * 2, i * 3) }
+		curr = curr.next_node
+	end
+	local deep_bin = binary_pack.encode(deep_root)
+	local deep_decoded = binary_pack.decode(deep_bin)
+	assert(deep_compare(deep_root, deep_decoded), "FAIL: 30-level deep table failed verification!")
+
+	-- test 4a: tampered sha256 payload
+	local tampered_first_byte = string.char((string.byte(sha_bin, 1) + 1) % 256)
+	local tampered_bin = tampered_first_byte .. string.sub(sha_bin, 2)
+	local ok_tamper, _ = pcall(binary_pack.decode_sha, tampered_bin)
+	assert(not ok_tamper, "FAIL: Tampered SHA data was not rejected!")
+
+	-- test 4b: circular reference trap
+	local cycle_table = { name = "Ouroboros" }
+	cycle_table.self_ref = cycle_table
+	local ok_cycle, _ = pcall(binary_pack.encode, cycle_table)
+	assert(not ok_cycle, "FAIL: Circular table reference was not aborted!")
+
+	-- test 4c: unsupported lua type (function)
+	local bad_type_table = { valid = 123, bad_func = function() end }
+	local ok_func, _ = pcall(binary_pack.encode, bad_type_table)
+	assert(not ok_func, "FAIL: Unsupported function type was not aborted!")
+
+	-- test 4d: unsupported userdata (msg.url)
+	local bad_userdata_table = { my_url = msg.url() }
+	local ok_url, _ = pcall(binary_pack.encode, bad_userdata_table)
+	assert(not ok_url, "FAIL: Unsupported userdata (msg.url) was not aborted!")
+
+	-- test 4e: truncated binary stream
+	local truncated_bin = string.sub(raw_bin, 1, #raw_bin - 10)
+	local ok_trunc, _ = pcall(binary_pack.decode, truncated_bin)
+	assert(not ok_trunc, "FAIL: Truncated binary stream was not rejected!")
+
+	-- test 4f: non-table root value
+	local ok_root, _ = pcall(binary_pack.encode, "not_a_table")
+	assert(not ok_root, "FAIL: Non-table root value was not rejected!")
+
+	-- print unit test summary
+	local unit_results = {
+		{ "1A. Standard Round-Trip",  "All Lua & Defold types + null bytes",      "PASS" },
+		{ "1B. Hash Table Keys",      "Userdata hash() used as table key",        "PASS" },
+		{ "2.  SHA-256 Integrity",    "32-byte digest verified & decoded",        "PASS" },
+		{ "3.  Deep Nesting (30x)",   "Recursive table depth & stack check",      "PASS" },
+		{ "4A. Tampered SHA Trap",    "Corrupt byte rejected by SHA-256",         "PASS" },
+		{ "4B. Cycle Detection Trap", "Self-referencing table safely aborted",    "PASS" },
+		{ "4C. Bad Lua Type Trap",    "Function type safely rejected",            "PASS" },
+		{ "4D. Bad Userdata Trap",    "Unsupported msg.url safely rejected",      "PASS" },
+		{ "4E. Truncated Stream Trap","Incomplete byte stream safely rejected",   "PASS" },
+		{ "4F. Non-Table Root Trap",  "Single non-table value safely rejected",   "PASS" },
+	}
+
+	print(string.format("%-25s | %-41s | %6s", "Test Case", "Details", "Status"))
+	print(string.rep("-", 77))
+	for _, r in ipairs(unit_results) do
+		print(string.format("%-25s | %-41s | %6s", r[1], r[2], r[3]))
+	end
+	print(string.rep("-", 77))
+
+	-- section 2: core payload and 100-node level benchmarks
+	local core_iters = 40000
+	print_banner(string.format("CORE BENCHMARKS (%d ITERATIONS)", core_iters), 77)
+
+	-- build 100-node game level table
+	local level_data = { version = 1, grid_w = 32, grid_h = 32, nodes = {} }
+	for i = 1, 100 do
+		level_data.nodes[i] = {
+			id = i,
+			grid_x = (i % 32),
+			grid_y = math.floor(i / 32),
+			node_type = hash("conductor_node"),
+			pos = vmath.vector3(i * 16.0, i * 8.0, 0),
+			active = (i % 2 == 0),
+			connections = { ((i % 100) + 1), ((i + 1) % 100) + 1 }
+		}
+	end
+
+	local sys_level = sys.serialize(level_data)
+	local bin_level = binary_pack.encode(level_data)
+	assert(deep_compare(level_data, binary_pack.decode(bin_level)), "FAIL: 100-node level_data mismatch!")
+
+	-- time master payload encode and decode
+	local t0 = socket.gettime()
+	for i = 1, core_iters do sys.serialize(original_data) end
+	local sys_enc_ms = (socket.gettime() - t0) * 1000
+
+	t0 = socket.gettime()
+	for i = 1, core_iters do binary_pack.encode(original_data) end
+	local raw_enc_ms = (socket.gettime() - t0) * 1000
+
+	t0 = socket.gettime()
+	for i = 1, core_iters do binary_pack.encode_sha(original_data) end
+	local sha_enc_ms = (socket.gettime() - t0) * 1000
+
+	t0 = socket.gettime()
+	for i = 1, core_iters do sys.deserialize(sys_bin) end
+	local sys_dec_ms = (socket.gettime() - t0) * 1000
+
+	t0 = socket.gettime()
+	for i = 1, core_iters do binary_pack.decode(raw_bin) end
+	local raw_dec_ms = (socket.gettime() - t0) * 1000
+
+	t0 = socket.gettime()
+	for i = 1, core_iters do binary_pack.decode_sha(sha_bin) end
+	local sha_dec_ms = (socket.gettime() - t0) * 1000
+
+	print(string.format("%-22s | %8s | %8s | %6s | %7s | %7s | %6s", 
+		"Core Payload", "BinSize", "SysSize", "Saving", "Enc Spd", "Dec Spd", "Verify"))
+	print(string.rep("-", 77))
+
+	local raw_savg = 100 - ((#raw_bin / #sys_bin) * 100)
+	local sha_savg = 100 - ((#sha_bin / #sys_bin) * 100)
+	local lvl_savg = 100 - ((#bin_level / #sys_level) * 100)
+
+	print(string.format("%-22s | %8d | %8d | %5.1f%% | %6.2fx | %6.2fx | %6s", 
+		"Master Mix (encode)", #raw_bin, #sys_bin, raw_savg, sys_enc_ms / raw_enc_ms, sys_dec_ms / raw_dec_ms, "PASS"))
+	print(string.format("%-22s | %8d | %8d | %5.1f%% | %6.2fx | %6.2fx | %6s", 
+		"Master Mix (SHA-256)", #sha_bin, #sys_bin, sha_savg, sys_enc_ms / sha_enc_ms, sys_dec_ms / sha_dec_ms, "PASS"))
+	print(string.format("%-22s | %8d | %8d | %5.1f%% | %7s | %7s | %6s", 
+		"100-Node Level Data", #bin_level, #sys_level, lvl_savg, "N/A", "N/A", "PASS"))
+	print(string.rep("-", 77))
+	print(string.format("Timings (%dk runs) -> Encode: sys %.2fms | pack %.2fms | sha %.2fms", core_iters / 1000, sys_enc_ms, raw_enc_ms, sha_enc_ms))
+	print(string.format("Timings (%dk runs) -> Decode: sys %.2fms | pack %.2fms | sha %.2fms", core_iters / 1000, sys_dec_ms, raw_dec_ms, sha_dec_ms))
+
+	-- section 3: macro benchmarks vs sys.serialize (standard and sha)
+	print_banner("BINARY_PACK VS SYS.SERIALIZE: MACRO BENCHMARKS", 97)
+
+	local datasets = {
+		{ 
+			name = "10,000 ints (0-99)", 
+			gen = function() local t={} for i=1,10000 do t[i]=(i-1)%100 end return t end 
+		},
+		{ 
+			name = "10,000 ints (1-10k)", 
+			gen = function() local t={} for i=1,10000 do t[i]=i end return t end 
+		},
+		{ 
+			name = "10,000 fractionals", 
+			gen = function() local t={} for i=1,10000 do t[i]=i+0.5 end return t end 
+		},
+		{ 
+			name = "10,000 booleans", 
+			gen = function() local t={} for i=1,10000 do t[i]=(i%2==0) end return t end 
+		},
+		{ 
+			name = "1,000 short strings", 
+			gen = function() local t={} for i=1,1000 do t[i]="str_"..i end return t end 
+		},
+		{ 
+			name = "1,000 str-key ints", 
+			gen = function() local t={} for i=1,1000 do t["key_"..i]=i end return t end 
+		},
+		{ 
+			name = "10,000 str-key ints", 
+			iters = 20,
+			gen = function() local t={} for i=1,10000 do t["key_"..i]=i end return t end 
+		},
+		{ 
+			name = "1,000 nested players", 
+			gen = function() 
+				local t={} 
+				for i=1,1000 do t[i]={id=i, name="player_"..i, score=i*10, active=true} end 
+				return t 
+			end 
+		}
+	}
+
+	print(string.format("%-22s | %8s | %8s | %6s | %7s | %7s | %7s | %7s | %6s", 
+		"Dataset", "BinSize", "SysSize", "Saving", "Enc Spd", "Dec Spd", "SHA Enc", "SHA Dec", "Verify"))
+	print(string.rep("-", 97))
+
+	local default_iterations = 100 
+
+	for _, test in ipairs(datasets) do
+		local runs = test.iters or default_iterations
+		local data = test.gen()
+		local t0
+
+		-- generate encoded strings
+		local s_bin = sys.serialize(data)
+		local b_bin = binary_pack.encode(data)
+		local b_sha = binary_pack.encode_sha(data)
+
+		-- verify decoded output matches original table
+		local decoded_bin = binary_pack.decode(b_bin)
+		local decoded_sha_bin = binary_pack.decode_sha(b_sha)
+		assert(deep_compare(data, decoded_bin), "FAIL: Deep compare mismatch on dataset: " .. test.name)
+		assert(deep_compare(data, decoded_sha_bin), "FAIL: SHA deep compare mismatch on dataset: " .. test.name)
+
+		-- time sys.serialize
+		t0 = socket.gettime()
+		for i = 1, runs do sys.serialize(data) end
+		local sys_enc_t = socket.gettime() - t0
+
+		-- time binary_pack.encode
+		t0 = socket.gettime()
+		for i = 1, runs do binary_pack.encode(data) end
+		local bin_enc_t = socket.gettime() - t0
+
+		-- time binary_pack.encode_sha
+		t0 = socket.gettime()
+		for i = 1, runs do binary_pack.encode_sha(data) end
+		local sha_enc_t = socket.gettime() - t0
+
+		-- time sys.deserialize
+		t0 = socket.gettime()
+		for i = 1, runs do sys.deserialize(s_bin) end
+		local sys_dec_t = socket.gettime() - t0
+
+		-- time binary_pack.decode
+		t0 = socket.gettime()
+		for i = 1, runs do binary_pack.decode(b_bin) end
+		local bin_dec_t = socket.gettime() - t0
+
+		-- time binary_pack.decode_sha
+		t0 = socket.gettime()
+		for i = 1, runs do binary_pack.decode_sha(b_sha) end
+		local sha_dec_t = socket.gettime() - t0
+
+		-- calculate savings and speed multipliers
+		local size_sys = #s_bin
+		local size_bin = #b_bin
+		local savings = 100 - ((size_bin / size_sys) * 100)
+
+		local speed_enc = bin_enc_t > 0 and (sys_enc_t / bin_enc_t) or 0
+		local speed_dec = bin_dec_t > 0 and (sys_dec_t / bin_dec_t) or 0
+		local speed_sha_enc = sha_enc_t > 0 and (sys_enc_t / sha_enc_t) or 0
+		local speed_sha_dec = sha_dec_t > 0 and (sys_dec_t / sha_dec_t) or 0
+
+		print(string.format("%-22s | %8d | %8d | %5.1f%% | %6.2fx | %6.2fx | %6.2fx | %6.2fx | %6s", 
+			test.name, size_bin, size_sys, savings, speed_enc, speed_dec, speed_sha_enc, speed_sha_dec, "PASS"))
+
+		collectgarbage("collect")
+	end
+	print(string.rep("-", 97))
+	print("all tests and benchmarks complete.")
+end
