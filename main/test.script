@@ -221,7 +221,8 @@ function init(self)
 	print(string.format("Timings (%dk runs) -> Decode: sys %.2fms | pack %.2fms | sha %.2fms", core_iters / 1000, sys_dec_ms, raw_dec_ms, sha_dec_ms))
 
 	-- section 3: macro benchmarks vs sys.serialize (standard and sha)
-	print_banner("BINARY_PACK VS SYS.SERIALIZE: MACRO BENCHMARKS", 97)
+	local num_samples = 10
+	print_banner(string.format("BINARY_PACK VS SYS.SERIALIZE: MACRO BENCHMARKS (%d-RUN AVG)", num_samples), 97)
 
 	local datasets = {
 		{ 
@@ -272,7 +273,6 @@ function init(self)
 	for _, test in ipairs(datasets) do
 		local runs = test.iters or default_iterations
 		local data = test.gen()
-		local t0
 
 		-- generate encoded strings
 		local s_bin = sys.serialize(data)
@@ -285,35 +285,54 @@ function init(self)
 		assert(deep_compare(data, decoded_bin), "FAIL: Deep compare mismatch on dataset: " .. test.name)
 		assert(deep_compare(data, decoded_sha_bin), "FAIL: SHA deep compare mismatch on dataset: " .. test.name)
 
-		-- time sys.serialize
-		t0 = socket.gettime()
-		for i = 1, runs do sys.serialize(data) end
-		local sys_enc_t = socket.gettime() - t0
+		local total_sys_enc_t = 0
+		local total_bin_enc_t = 0
+		local total_sha_enc_t = 0
+		local total_sys_dec_t = 0
+		local total_bin_dec_t = 0
+		local total_sha_dec_t = 0
 
-		-- time binary_pack.encode
-		t0 = socket.gettime()
-		for i = 1, runs do binary_pack.encode(data) end
-		local bin_enc_t = socket.gettime() - t0
+		for sample = 1, num_samples do
+			local t0
 
-		-- time binary_pack.encode_sha
-		t0 = socket.gettime()
-		for i = 1, runs do binary_pack.encode_sha(data) end
-		local sha_enc_t = socket.gettime() - t0
+			collectgarbage("collect")
+			t0 = socket.gettime()
+			for i = 1, runs do sys.serialize(data) end
+			total_sys_enc_t = total_sys_enc_t + (socket.gettime() - t0)
 
-		-- time sys.deserialize
-		t0 = socket.gettime()
-		for i = 1, runs do sys.deserialize(s_bin) end
-		local sys_dec_t = socket.gettime() - t0
+			collectgarbage("collect")
+			t0 = socket.gettime()
+			for i = 1, runs do binary_pack.encode(data) end
+			total_bin_enc_t = total_bin_enc_t + (socket.gettime() - t0)
 
-		-- time binary_pack.decode
-		t0 = socket.gettime()
-		for i = 1, runs do binary_pack.decode(b_bin) end
-		local bin_dec_t = socket.gettime() - t0
+			collectgarbage("collect")
+			t0 = socket.gettime()
+			for i = 1, runs do binary_pack.encode_sha(data) end
+			total_sha_enc_t = total_sha_enc_t + (socket.gettime() - t0)
 
-		-- time binary_pack.decode_sha
-		t0 = socket.gettime()
-		for i = 1, runs do binary_pack.decode_sha(b_sha) end
-		local sha_dec_t = socket.gettime() - t0
+			collectgarbage("collect")
+			t0 = socket.gettime()
+			for i = 1, runs do sys.deserialize(s_bin) end
+			total_sys_dec_t = total_sys_dec_t + (socket.gettime() - t0)
+
+			collectgarbage("collect")
+			t0 = socket.gettime()
+			for i = 1, runs do binary_pack.decode(b_bin) end
+			total_bin_dec_t = total_bin_dec_t + (socket.gettime() - t0)
+
+			collectgarbage("collect")
+			t0 = socket.gettime()
+			for i = 1, runs do binary_pack.decode_sha(b_sha) end
+			total_sha_dec_t = total_sha_dec_t + (socket.gettime() - t0)
+		end
+
+		-- average timings across all samples
+		local sys_enc_t = total_sys_enc_t / num_samples
+		local bin_enc_t = total_bin_enc_t / num_samples
+		local sha_enc_t = total_sha_enc_t / num_samples
+		local sys_dec_t = total_sys_dec_t / num_samples
+		local bin_dec_t = total_bin_dec_t / num_samples
+		local sha_dec_t = total_sha_dec_t / num_samples
 
 		-- calculate savings and speed multipliers
 		local size_sys = #s_bin
