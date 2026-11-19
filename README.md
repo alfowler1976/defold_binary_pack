@@ -24,3 +24,12 @@ Across typical game workloads, standard `binary_pack.encode()` and `binary_pack.
 * **Exact-Count Table Pre-Allocation:** Array and dictionary headers store exact element counts, allowing the decoder to pre-allocate exact Lua table capacities via `lua_createtable` with zero hash-table rehashing.
 * **Optional SHA-256 Integrity Verification:**  `binary_pack.encode_sha()` and `binary_pack.decode_sha()` append and verify a 32-byte cryptographic SHA-256 digest using `dmCrypt::HashSha256` to detect save-file corruption or casual tampering (trading some raw throughput for stronger data security).
 * **Memory & Safety Guards:** Reuses a persistent C++ buffer (up to 256 KB) to eliminate heap allocations across calls, while enforcing strict protections against non-table root inputs, circular table references, Lua stack overflows (max depth 64), `NaN`/`nil` keys, and truncated byte streams.
+
+## API
+
+All functions require a Lua `table` as the root value and throw a Lua error on failure (wrap calls in `pcall` to handle corrupt payloads or unsupported types safely).
+
+* **`binary_pack.encode(tbl)`** — Encodes a Lua table into a compact binary string.
+* **`binary_pack.decode(data)`** — Decodes a binary string back into a Lua table.
+* **`binary_pack.encode_sha(tbl)`** — Encodes a Lua table and appends a 32-byte SHA-256 checksum for tamper and corruption detection.
+* **`binary_pack.decode_sha(data)`** — Verifies the appended 32-byte SHA-256 checksum and decodes the binary string back into a Lua table. Throws an error if the checksum fails or the stream is corrupt.
