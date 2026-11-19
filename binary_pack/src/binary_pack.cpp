@@ -19,8 +19,9 @@
 #define LUA_STR_CACHE_MAX 16 // max string keys cached on lua stack
 
 // type markers
-// 0x00..0x1f -> standard types
-// 0x20..0x3f -> fixstr (length 0..31 embedded in marker)
+// 0x00..0x1f -> standard types (0x1c..0x1f unused)
+// 0x20..0x5f -> free block for future markers / 16-bit refs
+// 0x60..0x7f -> fixstr (length 0..31 embedded in marker)
 // 0x80..0xff -> fixint (integers 0..127 embedded in marker)
 
 enum TypeMarker : uint8_t {
@@ -169,7 +170,7 @@ static inline bool EncodeStringKey(lua_State* L, int index, serialiser_state& bu
 
 	// write string header and data based on length
 	if (len <= 31) {
-		buf.write_u8((uint8_t)(0x20 | len));
+		buf.write_u8((uint8_t)(0x60 | len));
 	} else if (len <= 255) {
 		buf.write_tag_u8(TYPE_STR8, (uint8_t)len);
 	} else {
@@ -249,7 +250,7 @@ static bool EncodeValue(lua_State* L, int index, serialiser_state& buf) {
 
 			// write string type based on length
 			if (len <= 31) {
-				buf.write_u8((uint8_t)(0x20 | len));
+				buf.write_u8((uint8_t)(0x60 | len));
 			} else if (len <= 255) {
 				buf.write_tag_u8(TYPE_STR8, (uint8_t)len);
 			} else {
@@ -571,8 +572,8 @@ static inline bool DecodeKey(lua_State* L, const uint8_t*& ptr, const uint8_t* e
 		return true;
 	}
 
-	// path 2: short fixstr key (0..31 bytes)
-	if ((ktype & 0xE0) == 0x20) {
+	// path 2: short fixstr key (0..31 bytes) in 0x60..0x7f
+	if ((ktype & 0xE0) == 0x60) {
 		ptr++;
 		uint8_t len = ktype & 0x1F;
 		if (len > (size_t)(end - ptr)) return false;
@@ -662,8 +663,8 @@ static bool DecodeValue(lua_State* L, const uint8_t*& ptr, const uint8_t* end, d
 		return true;
 	}
 
-	// path 2: embedded fixstr (0..31 bytes)
-	if ((type & 0xE0) == 0x20) {
+	// path 2: embedded fixstr (0..31 bytes) in 0x60..0x7f
+	if ((type & 0xE0) == 0x60) {
 		uint8_t len = type & 0x1F;
 		if (len > (size_t)(end - ptr)) return false;
 		lua_pushlstring(L, (const char*)ptr, len);
