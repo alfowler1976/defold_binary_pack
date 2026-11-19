@@ -34,6 +34,22 @@ For save files or sensitive payloads, `encode_sha()` and `decode_sha()` offer st
     
 -   **Memory & Safety Guards:** Reuses a persistent C++ buffer (up to 256 KB) to eliminate heap allocations across calls, while enforcing strict protections against non-table root inputs, circular table references, Lua stack overflows (max depth 64), `NaN`/`nil` keys, and truncated byte streams.
 
+## Comparisons against sys.serialize and sys.deserialise
+
+
+
+| Dataset | BinSize (B) | SysSize (B) | Saving | Enc Spd | Dec Spd | SHA Enc | SHA Dec | Verify |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
+| 10,000 ints (0-99) | 10,003 | 160,012 | 93.7% | 4.23x | 3.06x | 3.10x | 1.85x | PASS |
+| 10,000 ints (1-10k) | 29,621 | 160,012 | 81.5% | 3.80x | 2.91x | 1.92x | 0.95x | PASS |
+| 10,000 fractionals | 50,003 | 160,012 | 68.8% | 4.40x | 2.86x | 1.48x | 0.61x | PASS |
+| 10,000 booleans | 10,003 | 70,012 | 85.7% | 4.55x | 2.94x | 3.17x | 1.63x | PASS |
+| 1,000 short strings | 7,896 | 16,905 | 53.3% | 3.20x | 1.78x | 1.05x | 0.51x | PASS |
+| 1,000 str-key ints | 10,516 | 23,616 | 55.5% | 1.94x | 1.28x | 0.80x | 0.51x | PASS |
+| 10,000 str-key ints | 118,517 | 239,616 | 50.5% | 1.65x | 1.43x | 0.70x | 0.61x | PASS |
+| 1,000 nested players | 27,490 | 84,013 | 67.3% | 2.62x | 2.11x | 1.36x | 1.14x | PASS |
+
+
 ## Installation
 
 Add the repository URL to your `game.project` file under **Project → Dependencies**:
@@ -50,3 +66,4 @@ All functions require a Lua `table` as the root value and throw a Lua error on f
 * **`binary_pack.decode(data)`** — Decodes a binary string back into a Lua table.
 * **`binary_pack.encode_sha(tbl)`** — Encodes a Lua table and appends a 32-byte SHA-256 checksum for tamper and corruption detection.
 * **`binary_pack.decode_sha(data)`** — Verifies the appended 32-byte SHA-256 checksum and decodes the binary string back into a Lua table. Throws an error if the checksum fails or the stream is corrupt.
+
