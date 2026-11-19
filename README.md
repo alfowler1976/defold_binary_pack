@@ -1,11 +1,12 @@
 
-# Binary Pack
+# binary_pack
 
 **`binary_pack`** is a high-performance, ultra-compact C++ binary table serialization extension for the [Defold](https://defold.com/ "null") game engine. Designed as a faster, smaller drop-in replacement for `sys.serialize()` and `sys.deserialize()`, it supports all standard Lua primitives alongside first-class Defold userdata (`hash`, `vector3`, `vector4`, `quat`, `matrix4`) and optional SHA-256 integrity verification.
 
-While it performs similarly to MessagePack on general data, `binary_pack` includes further optimizations tailored specifically for **entity-style nested tables**  and native Defold math types. By automatically deduplicating repeated table keys into 2-byte references (`0..255`), caching decoded keys directly on the Lua stack, and compacting Defold userdata natively in C++, it cuts structured entity payloads by **~60% compared to MessagePack** (`27.5 KB` vs `70.5 KB` on 1,000 nested player records).
+While it performs similarly to MessagePack on general data, `binary_pack` includes further optimizations tailored specifically for **entity-style nested tables**  and native Defold math types. By automatically deduplicating repeated table keys into 2-byte references , caching decoded keys directly on the Lua stack, and compacting Defold userdata natively in C++, it cuts structured entity payloads by **~60% compared to MessagePack** (`27.5 KB` vs `70.5 KB` on 1,000 nested player records).
 
-Across typical game workloads, standard `binary_pack.encode()` and `binary_pack.decode()` reduce payload sizes by **50% to 94%** while encoding **2x to 4.4x faster** and decoding **1.5x to 2.5x faster** than Defold's built-in serializer. For save files or sensitive payloads, `encode_sha()` and `decode_sha()` offer stronger data integrity and tamper detection at the cost of additional SHA-256 hashing overhead. (SHA versions are between **0.75x to 3x** on encoding and **0.5x to 1.5x** on decoding)
+Size reduction and speed gains depend on the structure and types of data being serialized. On typical game workloads—such as nested entity tables, inventories, or mixed save data—`binary_pack.encode()` and `binary_pack.decode()` generally reduces payload sizes by **50% to 70%** (with higher savings on dense numeric or boolean arrays), while encoding and decoding roughly **1.5x to 4x faster** than `sys.serialize()` and `sys.deserialize()`.
+For save files or sensitive payloads, `encode_sha()` and `decode_sha()` offer stronger data integrity and tamper detection at the cost of additional SHA-256 hashing overhead. (SHA versions are between **0.75x to 3x** on encoding and **0.5x to 1.5x** on decoding)
 
 ## Features
 
