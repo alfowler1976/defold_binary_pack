@@ -1,4 +1,4 @@
-# binary_pack
+# Binary Pack
 
 **`binary_pack`** is a C++ binary table serialization extension for the [Defold](https://defold.com/) game engine, designed specifically to be faster than `sys.serialize()` and `sys.deserialize()` while generating significantly smaller payloads. It serves as a direct drop-in replacement that supports all standard Lua primitives alongside native Defold userdata (`hash`, `vector3`, `vector4`, `quat`, `matrix4`) and optional SHA-256 integrity verification.
 
