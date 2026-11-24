@@ -1,6 +1,8 @@
 
 # binary_pack
 
+![My Project Logo](media/binaey_pack_logo.png)
+
 **`binary_pack`** is a high-performance, ultra-compact C++ binary table serialization extension for the [Defold](https://defold.com/ "null") game engine. Designed as a faster, smaller drop-in replacement for `sys.serialize()` and `sys.deserialize()`, it supports all standard Lua primitives alongside first-class Defold userdata (`hash`, `vector3`, `vector4`, `quat`, `matrix4`) and optional SHA-256 integrity verification.
 
 While it performs similarly to MessagePack on general data, `binary_pack` includes further optimizations tailored specifically for **entity-style nested tables**  and native Defold math types. By automatically deduplicating repeated table keys into 2-byte references , caching decoded keys directly on the Lua stack, and compacting Defold userdata natively in C++, it cuts structured entity payloads by **~60% compared to MessagePack** (`27.5 KB` vs `70.5 KB` on 1,000 nested player records).
